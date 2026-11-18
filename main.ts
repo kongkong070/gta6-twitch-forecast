@@ -9,17 +9,24 @@
 // this case's hour-1 print, are the forecast. Two adjustments, both chosen by
 // leave-one-out cross-validation over the kit's 37 comparable launches:
 //
-//  1. Weights: rolling-midnight launches count double (GTA VI unlocks at midnight
+//  1. Weights: rolling-midnight launches count triple (GTA VI unlocks at midnight
 //     local, rolling, like them); early-access-contaminated and weak analogues
-//     count half. On the 12 rolling-midnight launches this cut LOO pinball loss
-//     from 0.375 (unweighted) to 0.358.
-//  2. Winsorise: log-ratios are capped at 2.0 (a ~7.4x rise over hour 1). The raw
+//     count three quarters. Weights alone, at cap 2.0, do not help (fully
+//     unweighted scores 0.322, weight-2 scores 0.323); the gain comes from the
+//     weights together with the tighter cap in point 2, which scores 0.299.
+//  2. Winsorise: log-ratios are capped at 1.25 (a ~3.5x rise over hour 1). The raw
 //     upper tail is dominated by simultaneous-global launches whose hour 1 was
 //     nearly empty before a later unlock; a rolling-midnight launch never rises
 //     that far, and the uncapped tail costs pinball loss on every hour it
-//     overshoots. Capping cut the rolling-launch LOO loss to 0.320, against the
-//     house baseline's 0.357 on the same launches (baseline: flat at hour 1 with
-//     a 0.15*sqrt(h-1) spread, which scores about 0.387 on the practice cases).
+//     overshoots. Re-tuning the cap by LOO: 2.0 -> 0.323, 1.5 -> 0.313,
+//     1.25 -> 0.306, 1.0 -> 0.305, 0.75 -> 0.319 (and 90% coverage collapses
+//     to 0.70 there, so the intervals turn overconfident). Combined with the
+//     weights above, cap 1.25 scores 0.299 with 90% coverage 0.880, against
+//     the house baseline's 0.357 on the same launches (baseline: flat at hour 1
+//     with a 0.15*sqrt(h-1) spread, which scores about 0.387 on the practice
+//     cases). Cap 1.25 sits in the middle of a flat plateau (1.0-1.25, weights
+//     3, weak 0.75-1 all score 0.299-0.305), so the choice is not a knife-edge
+//     fit to the 12 launches.
 //
 // The Grand Theft Auto VI category's own pre-release history (a comparable whose
 // series is a trailer-premiere spike, not a launch day) is left out of the
@@ -40,7 +47,7 @@ const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 /** The quantile levels the contest scores, in the order each row lists them. */
 const LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95];
 /** Largest log-ratio a launch-day hour may rise above hour 1 (see header). */
-const LOG_RATIO_CAP = 2.0;
+const LOG_RATIO_CAP = 1.25;
 /** Minimum observations before an hour borrows its neighbours' observations. */
 const MIN_OBS = 8;
 
@@ -77,8 +84,8 @@ function daySeries(c: Comparable): Array<number | undefined> {
 function calWeight(c: Comparable): number {
   const unlock = c.unlock || '';
   let w = 1;
-  if (/midnight local|rolling/i.test(unlock)) w *= 2;
-  if (/early-access-contaminated|weak/i.test(unlock)) w *= 0.5;
+  if (/midnight local|rolling/i.test(unlock)) w *= 3;
+  if (/early-access-contaminated|weak/i.test(unlock)) w *= 0.75;
   return w;
 }
 
@@ -101,7 +108,10 @@ const round2 = (x: number): number => Math.round(x * 100) / 100;
 
 /**
  * Log-ratio observations for one forecast hour, weighted by launch similarity.
- * Integer replication implements the weights exactly (weights are 0.5 / 1 / 2).
+ * Integer replication implements the weights approximately (weights are 0.75 /
+ * 1 / 2.25 / 3, i.e. 2 / 2 / 5 / 6 replications; a weak-only launch therefore
+ * counts the same as a plain one and the 0.75 only bites on launches that are
+ * both rolling-midnight and weak/contaminated).
  */
 function hourObservations(
   launches: Array<{ series: Array<number | undefined>; weight: number }>,
